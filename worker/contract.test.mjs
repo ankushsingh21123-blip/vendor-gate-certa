@@ -1,0 +1,30 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {DatabaseSync} from 'node:sqlite';
+import {readFileSync} from 'node:fs';
+import {handle,riskFor} from './index.mjs';
+function environment(){
+ const sql=new DatabaseSync(':memory:');
+ sql.exec(readFileSync(new URL('./schema.sql',import.meta.url),'utf8'));
+ const prepare=(q)=>({bind(...args){return {query:q,args,async all(){return {results:sql.prepare(q).all(...args)}},async first(){return sql.prepare(q).get(...args)||null}}},async first(){return sql.prepare(q).get()||null}});
+ const batch=async(statements)=>{sql.exec('BEGIN');try{const results=statements.map(s=>({meta:{changes:Number(sql.prepare(s.query).run(...s.args).changes)}}));sql.exec('COMMIT');return results}catch(e){sql.exec('ROLLBACK');throw e}};
+ return {sql,DB:{prepare,batch},ASSETS:{fetch:async()=>new Response('frontend')}};
+}
+async function call(env,path,method='GET',body,token,origin){const headers={};if(token)headers['X-Workspace']=token;if(body!==undefined)headers['Content-Type']='application/json';if(origin)headers.Origin=origin;const response=await handle(new Request('https://demo.test'+path,{method,headers,body:body===undefined?undefined:JSON.stringify(body)}),env);return {status:response.status,body:await response.json()}}
+async function setup(){const env=environment();const token=(await call(env,'/api/workspaces','POST')).body.workspace;const vendors=(await call(env,'/api/vendors','GET',undefined,token)).body.vendors;return {env,token,v:vendors[0],vendors}}
+const newVendor={name:'Cedar Test',category:'Software',country:'India',amount:150000,data_access:'sensitive'};
+test('health verifies SQL and states D1',async()=>{const env=environment();assert.equal((await call(env,'/api/health')).body.storage,'d1')});
+test('sessions required',async()=>{const env=environment();assert.equal((await call(env,'/api/vendors')).status,401)});
+test('workspace isolation',async()=>{const {env,v}=await setup();const token=(await call(env,'/api/workspaces','POST')).body.workspace;assert.equal((await call(env,'/api/vendors/'+v.id,'GET',undefined,token)).status,404)});
+test('risk boundaries',()=>{assert.equal(riskFor(19999,'none','India'),'low');assert.equal(riskFor(20000,'none','India'),'medium');assert.equal(riskFor(100000,'personal','India'),'high')});
+test('validation rejects missing and invalid fields',async()=>{const {env,token}=await setup();assert.equal((await call(env,'/api/vendors','POST',{name:'x',amount:-1},token)).status,422)});
+test('duplicate names case insensitive',async()=>{const {env,token,v}=await setup();assert.equal((await call(env,'/api/vendors','POST',{...newVendor,name:v.name.toUpperCase()},token)).status,422)});
+test('created vendor persists across reads',async()=>{const {env,token}=await setup();const r=await call(env,'/api/vendors','POST',newVendor,token);assert.equal(r.status,201);assert.equal(r.body.vendor.risk,'high');assert.equal((await call(env,'/api/vendors/'+r.body.vendor.id,'GET',undefined,token)).body.vendor.name,'Cedar Test')});
+test('invalid status transition',async()=>{const {env,token,v}=await setup();assert.equal((await call(env,'/api/vendors/'+v.id,'PATCH',{version:v.version,action:'transition',status:'approved'},token)).status,422)});
+test('approval requires evidence then locks evidence until reopened',async()=>{const {env,token,v}=await setup();let current=(await call(env,'/api/vendors/'+v.id,'PATCH',{version:v.version,action:'transition',status:'review'},token)).body.vendor;assert.equal((await call(env,'/api/vendors/'+v.id,'PATCH',{version:current.version,action:'transition',status:'approved'},token)).status,422);for(const kind of current.required)current=(await call(env,'/api/vendors/'+v.id,'PATCH',{version:current.version,action:'evidence',kind,reference:'Synthetic reference'},token)).body.vendor;current=(await call(env,'/api/vendors/'+v.id,'PATCH',{version:current.version,action:'transition',status:'approved'},token)).body.vendor;assert.equal(current.status,'approved');assert.ok(current.audit.length>2);assert.equal((await call(env,'/api/vendors/'+v.id,'PATCH',{version:current.version,action:'evidence',kind:current.required[0],reference:'Synthetic change'},token)).status,409);assert.equal((await call(env,'/api/vendors/'+v.id,'PATCH',{version:current.version,action:'transition',status:'review'},token)).status,200)});
+test('stale version has no side effects',async()=>{const {env,token,v}=await setup();await call(env,'/api/vendors/'+v.id,'PATCH',{version:v.version,action:'transition',status:'review'},token);const before=await call(env,'/api/vendors/'+v.id,'GET',undefined,token);assert.equal((await call(env,'/api/vendors/'+v.id,'PATCH',{version:v.version,action:'evidence',kind:v.required[0],reference:'Should not save'},token)).status,409);assert.deepEqual((await call(env,'/api/vendors/'+v.id,'GET',undefined,token)).body,before.body)});
+test('same-origin write protection',async()=>{const {env}=await setup();assert.equal((await call(env,'/api/workspaces','POST',{},undefined,'https://evil.test')).status,403)});
+test('expired workspaces cleaned without disturbing new workspace',async()=>{const {env,token}=await setup();env.sql.prepare('UPDATE workspaces SET created=? WHERE id=?').run('2020-01-01T00:00:00.000Z',token);assert.equal((await call(env,'/api/workspaces','POST')).status,201);assert.equal((await call(env,'/api/vendors','GET',undefined,token)).status,401)});
+test('oversize body rejected',async()=>{const {env,token}=await setup();assert.equal((await call(env,'/api/vendors','POST',{name:'x'.repeat(33000)},token)).status,413)});
+test('fractional/undefined/null amounts rejected',async()=>{const {env,token}=await setup();for(const amount of [1.2,undefined,null,''])assert.equal((await call(env,'/api/vendors','POST',{...newVendor,amount},token)).status,422)});
+test('malformed JSON yields explicit client error',async()=>{const {env,token}=await setup();const r=await handle(new Request('https://demo.test/api/vendors',{method:'POST',headers:{'X-Workspace':token},body:'['}),env);assert.equal(r.status,400)});

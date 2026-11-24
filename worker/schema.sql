@@ -1,0 +1,7 @@
+PRAGMA foreign_keys=ON;
+CREATE TABLE IF NOT EXISTS workspaces(id TEXT PRIMARY KEY, created TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS vendors(id TEXT PRIMARY KEY,workspace TEXT NOT NULL REFERENCES workspaces(id),name TEXT NOT NULL,category TEXT NOT NULL,country TEXT NOT NULL,amount INTEGER NOT NULL CHECK(amount>=0),data_access TEXT NOT NULL,risk TEXT NOT NULL,status TEXT NOT NULL,version INTEGER NOT NULL DEFAULT 1,created TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS evidence(id TEXT PRIMARY KEY,vendor TEXT NOT NULL REFERENCES vendors(id),kind TEXT NOT NULL,reference TEXT NOT NULL,created TEXT NOT NULL,UNIQUE(vendor,kind));
+CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT,vendor TEXT NOT NULL REFERENCES vendors(id),action TEXT NOT NULL,detail TEXT NOT NULL,created TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS vendor_workspace ON vendors(workspace);
+CREATE UNIQUE INDEX IF NOT EXISTS vendor_name_workspace ON vendors(workspace,lower(name));

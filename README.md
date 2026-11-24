@@ -59,3 +59,7 @@ Annual USD amount: <20k = 0, 20k–99,999 = 1, >=100k = 2. Data: none = 0, perso
 No real login, role-based authorization, signed audit export, malware/file scanning or production anti-abuse controls. A workspace bearer token must not be used for private records. SQLite serializes writes and suits this bounded single-worker demo, not a scaled multi-instance service. Public anonymous workspace creation can exhaust the cap. Add shared edge throttling before open production use. No paid host, card, trial or automatic upgrade is part of this source.
 
 MIT-licensed project code. React/React Router/Vite/Vitest/Flask and other dependencies retain their own licences. Substantial AI assistance was used for implementation, debugging and tests.
+
+## Alternative hosting adapter, prepared locally
+
+`worker/` contains an original Workers/D1 adapter with 15 SQLite-backed contract tests and 3 passing browser scenarios. No Cloudflare Worker or D1 database exists yet. These are local simulations, not production runtime or remote durability proof. See `worker/README.md` for the held prerequisites. The example configuration intentionally has no real database ID.
