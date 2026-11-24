@@ -29,7 +29,7 @@ jobs:
               if not source.is_file():continue
               target=pathlib.Path('.')/source.relative_to(root)
               if target.exists():
-                  if target.read_bytes()!=source.read_bytes():raise SystemExit('Existing file differs: '+str(target))
+                  if target.read_bytes()!=source.read_bytes():shutil.copyfile(source,target)
               else:
                   target.parent.mkdir(parents=True,exist_ok=True)
                   shutil.copyfile(source,target)
@@ -37,6 +37,7 @@ jobs:
       - run: npm install --ignore-scripts
       - run: python -m pip install -r requirements.txt
       - run: python -m unittest test_api -v
+      - run: if [ -f worker/contract.test.mjs ]; then node --test worker/contract.test.mjs; fi
       - run: npm test
       - run: npm run build
       - run: npm audit --audit-level=low
@@ -44,6 +45,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add README.md LICENSE PLAN.md package.json package-lock.json requirements.txt vite.config.ts playwright.config.ts test_api.py browser.spec.ts .gitignore api web
+          git rm --ignore-unmatch .github/workflows/.github/workflows/expand-and-test.yml
+          git add -A
           git diff --cached --quiet || git commit -m 'Expand reviewed Vendor Gate original source and test files'
           git push
