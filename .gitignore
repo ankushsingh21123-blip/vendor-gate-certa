@@ -1,0 +1,7 @@
+node_modules/
+static/
+.env*
+!.env.example
+*.sqlite*
+__pycache__/
+.pytest_cache/
