@@ -98,7 +98,14 @@ FILES = {'README.md': '# Vendor Gate\n'
               '\n'
               'MIT-licensed project code. React/React Router/Vite/Vitest/Flask and other dependencies retain '
               'their own licences. Substantial AI assistance was used for implementation, debugging and '
-              'tests.\n',
+              'tests.\n'
+              '\n'
+              '## Alternative hosting adapter, prepared locally\n'
+              '\n'
+              '`worker/` contains an original Workers/D1 adapter with 15 SQLite-backed contract tests and 3 '
+              'passing browser scenarios. No Cloudflare Worker or D1 database exists yet. These are local '
+              'simulations, not production runtime or remote durability proof. See `worker/README.md` for '
+              'the held prerequisites. The example configuration intentionally has no real database ID.\n',
  'LICENSE': 'MIT License\n'
             '\n'
             'Copyright (c) 2026 Ankush Singh\n'
@@ -899,7 +906,377 @@ FILES = {'README.md': '# Vendor Gate\n'
                   'td[data-label]::before{content:attr(data-label);color:#7c8b76;font-size:11px}.table-wrap '
                   'td[data-label="Evidence"]{flex-wrap:wrap}.table-wrap td '
                   '.progress{display:none}.table-wrap td '
-                  'small{margin-top:4px}.vendor-link{font-size:14px}}\n'}
+                  'small{margin-top:4px}.vendor-link{font-size:14px}}\n',
+ 'worker/schema.sql': 'PRAGMA foreign_keys=ON;\n'
+                      'CREATE TABLE IF NOT EXISTS workspaces(id TEXT PRIMARY KEY, created TEXT NOT NULL);\n'
+                      'CREATE TABLE IF NOT EXISTS vendors(id TEXT PRIMARY KEY,workspace TEXT NOT NULL '
+                      'REFERENCES workspaces(id),name TEXT NOT NULL,category TEXT NOT NULL,country TEXT NOT '
+                      'NULL,amount INTEGER NOT NULL CHECK(amount>=0),data_access TEXT NOT NULL,risk TEXT NOT '
+                      'NULL,status TEXT NOT NULL,version INTEGER NOT NULL DEFAULT 1,created TEXT NOT NULL);\n'
+                      'CREATE TABLE IF NOT EXISTS evidence(id TEXT PRIMARY KEY,vendor TEXT NOT NULL '
+                      'REFERENCES vendors(id),kind TEXT NOT NULL,reference TEXT NOT NULL,created TEXT NOT '
+                      'NULL,UNIQUE(vendor,kind));\n'
+                      'CREATE TABLE IF NOT EXISTS audit(id INTEGER PRIMARY KEY AUTOINCREMENT,vendor TEXT NOT '
+                      'NULL REFERENCES vendors(id),action TEXT NOT NULL,detail TEXT NOT NULL,created TEXT '
+                      'NOT NULL);\n'
+                      'CREATE INDEX IF NOT EXISTS vendor_workspace ON vendors(workspace);\n'
+                      'CREATE UNIQUE INDEX IF NOT EXISTS vendor_name_workspace ON '
+                      'vendors(workspace,lower(name));\n',
+ 'worker/README.md': '# Cloudflare adapter, prepared locally, NOT deployed\n'
+                     '\n'
+                     'This is an alternative runtime for the original Vendor Gate application. The '
+                     'Flask/SQLite API remains the default local implementation. This adapter uses a '
+                     'Cloudflare Worker and a dedicated D1 database for remote persistence. No Worker or D1 '
+                     'database has been created and there is no live URL yet.\n'
+                     '\n'
+                     '## Verified locally\n'
+                     '\n'
+                     '- `node --test worker/contract.test.mjs`: 15 contract tests with a real SQLite '
+                     'database behind a small D1-compatible interface.\n'
+                     "- `VENDOR_TEST_SERVER='node worker/local-server.mjs' npx playwright test`: 3 full "
+                     'browser scenarios against the adapter, including saved vendor data after reload, '
+                     'evidence and approval/reopen, expired sessions, offline errors, and 1280/390/320 '
+                     'layouts.\n'
+                     '- These tests are NOT proof of the Cloudflare runtime, production concurrency, D1 '
+                     'limits, or remote durability. Repeat the tests on the actual deployed service before '
+                     'using the project in an application.\n'
+                     '\n'
+                     '## Deployment prerequisites, still held\n'
+                     '\n'
+                     'The existing Cloudflare account requires verification of its Casano email. The mailbox '
+                     'is behind an expired-trial screen. Account/plan changes and feedback submissions '
+                     'remain held while the owner resolves access. No email address change is planned.\n'
+                     '\n'
+                     'After owner-authorized access is available:\n'
+                     '\n'
+                     "1. Confirm the account's actual free Workers and D1 plans, quotas, terms and no "
+                     'billing/card requirement. Do not upgrade or enable paid usage.\n'
+                     '2. Create a NEW dedicated empty D1 database for this synthetic project only. Do not '
+                     'bind, resume, migrate, clear or repurpose any existing application database.\n'
+                     '3. Apply `worker/schema.sql` to that new database. Review the deployed schema.\n'
+                     '4. Bind it as `DB`; bind the Vite `static/` output as `ASSETS`. Configure SPA fallback '
+                     'and Worker-first `/api/*` routing as in the example configuration. Supply the actual '
+                     'created database identifier, never the placeholder.\n'
+                     '5. Build the frontend and deploy the Worker. Verify the public health response states '
+                     'D1, create a synthetic workspace, exercise isolation, validation, '
+                     'evidence/approval/reopen and refresh persistence. Confirm a saved vendor survives a '
+                     'later independent request and a deployment/restart, then re-check deletion/expiry '
+                     'behavior.\n'
+                     '6. Inspect desktop/mobile pixels at the actual public URL. Do not claim live or '
+                     'persistent until those checks pass.\n'
+                     '\n'
+                     '## Data and safety limits\n'
+                     '\n'
+                     'Synthetic vendor details only. Workspace tokens are random bearer tokens stored by the '
+                     'browser; this is a portfolio demo, not a production identity system. Do not enter '
+                     'private documents, personal data or actual compliance evidence. Prepared SQL, '
+                     'transactional batches, same-origin writes, request-size checks and SQL version guards '
+                     'protect the demo workflow. Workspaces are cleaned after seven days on workspace '
+                     'creation. Limits are 100 workspaces and 40 vendors per workspace; these '
+                     'application-level capacity checks are best-effort under concurrent creation and do not '
+                     "replace the provider's free-tier limits. No sensitive request bodies are logged.\n"
+                     '\n'
+                     '## Sources read for this adapter\n'
+                     '\n'
+                     '- https://developers.cloudflare.com/workers/static-assets/binding/\n'
+                     '- https://developers.cloudflare.com/d1/worker-api/d1-database/\n'
+                     '- https://developers.cloudflare.com/d1/worker-api/prepared-statements/\n'
+                     '- https://developers.cloudflare.com/workers/platform/pricing/\n'
+                     '- https://developers.cloudflare.com/d1/platform/pricing/\n',
+ 'worker/local-server.mjs': '// Local harness only. Exercises the Worker request handler with real SQLite.\n'
+                            '// Not proof of Cloudflare runtime or remote D1 behavior.\n'
+                            "import http from 'node:http';\n"
+                            "import {DatabaseSync} from 'node:sqlite';\n"
+                            "import {readFileSync,existsSync,statSync} from 'node:fs';\n"
+                            "import {resolve,extname} from 'node:path';\n"
+                            "import handler from './index.mjs';\n"
+                            'const sql=new '
+                            "DatabaseSync(process.env.VENDOR_WORKER_DB||'/tmp/vendor-gate-worker-local.sqlite');\n"
+                            "sql.exec(readFileSync(new URL('./schema.sql',import.meta.url),'utf8'));\n"
+                            'const prepare=q=>({bind(...args){return {query:q,args,async all(){return '
+                            '{results:sql.prepare(q).all(...args)}},async first(){return '
+                            'sql.prepare(q).get(...args)||null}}},async first(){return '
+                            'sql.prepare(q).get()||null}});\n'
+                            "const batch=async(statements)=>{sql.exec('BEGIN');try{const "
+                            "results=statements.map(s=>({meta:{changes:Number(sql.prepare(s.query).run(...s.args).changes)}}));sql.exec('COMMIT');return "
+                            "results}catch(e){sql.exec('ROLLBACK');throw e}};\n"
+                            "const root=resolve(new URL('../static/',import.meta.url).pathname);\n"
+                            'const '
+                            "types={'.html':'text/html','.js':'text/javascript','.css':'text/css','.svg':'image/svg+xml'};\n"
+                            'const env={DB:{prepare,batch},ASSETS:{async fetch(request){const u=new '
+                            'URL(request.url);let '
+                            "path=resolve(root,'.'+u.pathname);if(!path.startsWith(root+'/')||!existsSync(path)||!statSync(path).isFile())path=root+'/index.html';return "
+                            'new '
+                            "Response(readFileSync(path),{headers:{'Content-Type':types[extname(path)]||'application/octet-stream'}})}}};\n"
+                            'http.createServer(async(req,res)=>{try{const chunks=[];for await(const c of '
+                            'req)chunks.push(c);const body=Buffer.concat(chunks);const request=new '
+                            "Request('http://'+req.headers.host+req.url,{method:req.method,headers:req.headers,...(body.length?{body}:{} "
+                            ')});const response=await '
+                            'handler.fetch(request,env);res.writeHead(response.status,Object.fromEntries(response.headers));res.end(Buffer.from(await '
+                            "response.arrayBuffer()))}catch(e){console.error(e);res.writeHead(500);res.end('Local "
+                            "harness error')}}).listen(4178,'127.0.0.1',()=>console.log('Local Worker "
+                            "adapter on 4178, SQLite simulation only'));\n",
+ 'worker/contract.test.mjs': "import {test} from 'node:test';\n"
+                             "import assert from 'node:assert/strict';\n"
+                             "import {DatabaseSync} from 'node:sqlite';\n"
+                             "import {readFileSync} from 'node:fs';\n"
+                             "import {handle,riskFor} from './index.mjs';\n"
+                             'function environment(){\n'
+                             " const sql=new DatabaseSync(':memory:');\n"
+                             " sql.exec(readFileSync(new URL('./schema.sql',import.meta.url),'utf8'));\n"
+                             ' const prepare=(q)=>({bind(...args){return {query:q,args,async all(){return '
+                             '{results:sql.prepare(q).all(...args)}},async first(){return '
+                             'sql.prepare(q).get(...args)||null}}},async first(){return '
+                             'sql.prepare(q).get()||null}});\n'
+                             " const batch=async(statements)=>{sql.exec('BEGIN');try{const "
+                             "results=statements.map(s=>({meta:{changes:Number(sql.prepare(s.query).run(...s.args).changes)}}));sql.exec('COMMIT');return "
+                             "results}catch(e){sql.exec('ROLLBACK');throw e}};\n"
+                             ' return {sql,DB:{prepare,batch},ASSETS:{fetch:async()=>new '
+                             "Response('frontend')}};\n"
+                             '}\n'
+                             "async function call(env,path,method='GET',body,token,origin){const "
+                             "headers={};if(token)headers['X-Workspace']=token;if(body!==undefined)headers['Content-Type']='application/json';if(origin)headers.Origin=origin;const "
+                             'response=await handle(new '
+                             "Request('https://demo.test'+path,{method,headers,body:body===undefined?undefined:JSON.stringify(body)}),env);return "
+                             '{status:response.status,body:await response.json()}}\n'
+                             'async function setup(){const env=environment();const token=(await '
+                             "call(env,'/api/workspaces','POST')).body.workspace;const vendors=(await "
+                             "call(env,'/api/vendors','GET',undefined,token)).body.vendors;return "
+                             '{env,token,v:vendors[0],vendors}}\n'
+                             "const newVendor={name:'Cedar "
+                             "Test',category:'Software',country:'India',amount:150000,data_access:'sensitive'};\n"
+                             "test('health verifies SQL and states D1',async()=>{const "
+                             'env=environment();assert.equal((await '
+                             "call(env,'/api/health')).body.storage,'d1')});\n"
+                             "test('sessions required',async()=>{const env=environment();assert.equal((await "
+                             "call(env,'/api/vendors')).status,401)});\n"
+                             "test('workspace isolation',async()=>{const {env,v}=await setup();const "
+                             'token=(await '
+                             "call(env,'/api/workspaces','POST')).body.workspace;assert.equal((await "
+                             "call(env,'/api/vendors/'+v.id,'GET',undefined,token)).status,404)});\n"
+                             "test('risk "
+                             "boundaries',()=>{assert.equal(riskFor(19999,'none','India'),'low');assert.equal(riskFor(20000,'none','India'),'medium');assert.equal(riskFor(100000,'personal','India'),'high')});\n"
+                             "test('validation rejects missing and invalid fields',async()=>{const "
+                             '{env,token}=await setup();assert.equal((await '
+                             "call(env,'/api/vendors','POST',{name:'x',amount:-1},token)).status,422)});\n"
+                             "test('duplicate names case insensitive',async()=>{const {env,token,v}=await "
+                             'setup();assert.equal((await '
+                             "call(env,'/api/vendors','POST',{...newVendor,name:v.name.toUpperCase()},token)).status,422)});\n"
+                             "test('created vendor persists across reads',async()=>{const {env,token}=await "
+                             'setup();const r=await '
+                             "call(env,'/api/vendors','POST',newVendor,token);assert.equal(r.status,201);assert.equal(r.body.vendor.risk,'high');assert.equal((await "
+                             "call(env,'/api/vendors/'+r.body.vendor.id,'GET',undefined,token)).body.vendor.name,'Cedar "
+                             "Test')});\n"
+                             "test('invalid status transition',async()=>{const {env,token,v}=await "
+                             'setup();assert.equal((await '
+                             "call(env,'/api/vendors/'+v.id,'PATCH',{version:v.version,action:'transition',status:'approved'},token)).status,422)});\n"
+                             "test('approval requires evidence then locks evidence until "
+                             "reopened',async()=>{const {env,token,v}=await setup();let current=(await "
+                             "call(env,'/api/vendors/'+v.id,'PATCH',{version:v.version,action:'transition',status:'review'},token)).body.vendor;assert.equal((await "
+                             "call(env,'/api/vendors/'+v.id,'PATCH',{version:current.version,action:'transition',status:'approved'},token)).status,422);for(const "
+                             'kind of current.required)current=(await '
+                             "call(env,'/api/vendors/'+v.id,'PATCH',{version:current.version,action:'evidence',kind,reference:'Synthetic "
+                             "reference'},token)).body.vendor;current=(await "
+                             "call(env,'/api/vendors/'+v.id,'PATCH',{version:current.version,action:'transition',status:'approved'},token)).body.vendor;assert.equal(current.status,'approved');assert.ok(current.audit.length>2);assert.equal((await "
+                             "call(env,'/api/vendors/'+v.id,'PATCH',{version:current.version,action:'evidence',kind:current.required[0],reference:'Synthetic "
+                             "change'},token)).status,409);assert.equal((await "
+                             "call(env,'/api/vendors/'+v.id,'PATCH',{version:current.version,action:'transition',status:'review'},token)).status,200)});\n"
+                             "test('stale version has no side effects',async()=>{const {env,token,v}=await "
+                             'setup();await '
+                             "call(env,'/api/vendors/'+v.id,'PATCH',{version:v.version,action:'transition',status:'review'},token);const "
+                             'before=await '
+                             "call(env,'/api/vendors/'+v.id,'GET',undefined,token);assert.equal((await "
+                             "call(env,'/api/vendors/'+v.id,'PATCH',{version:v.version,action:'evidence',kind:v.required[0],reference:'Should "
+                             "not save'},token)).status,409);assert.deepEqual((await "
+                             "call(env,'/api/vendors/'+v.id,'GET',undefined,token)).body,before.body)});\n"
+                             "test('same-origin write protection',async()=>{const {env}=await "
+                             'setup();assert.equal((await '
+                             "call(env,'/api/workspaces','POST',{},undefined,'https://evil.test')).status,403)});\n"
+                             "test('expired workspaces cleaned without disturbing new "
+                             "workspace',async()=>{const {env,token}=await setup();env.sql.prepare('UPDATE "
+                             'workspaces SET created=? WHERE '
+                             "id=?').run('2020-01-01T00:00:00.000Z',token);assert.equal((await "
+                             "call(env,'/api/workspaces','POST')).status,201);assert.equal((await "
+                             "call(env,'/api/vendors','GET',undefined,token)).status,401)});\n"
+                             "test('oversize body rejected',async()=>{const {env,token}=await "
+                             'setup();assert.equal((await '
+                             "call(env,'/api/vendors','POST',{name:'x'.repeat(33000)},token)).status,413)});\n"
+                             "test('fractional/undefined/null amounts rejected',async()=>{const "
+                             '{env,token}=await setup();for(const amount of '
+                             "[1.2,undefined,null,''])assert.equal((await "
+                             "call(env,'/api/vendors','POST',{...newVendor,amount},token)).status,422)});\n"
+                             "test('malformed JSON yields explicit client error',async()=>{const "
+                             '{env,token}=await setup();const r=await handle(new '
+                             "Request('https://demo.test/api/vendors',{method:'POST',headers:{'X-Workspace':token},body:'['}),env);assert.equal(r.status,400)});\n",
+ 'worker/index.mjs': '// Original Vendor Gate adapter for Workers + D1. Local-only until live verification.\n'
+                     'export const '
+                     "requirements={low:['business'],medium:['business','privacy'],high:['business','privacy','security','financial']};\n"
+                     'export function riskFor(amount,data,country){const '
+                     "n=(amount>=100000?2:amount>=20000?1:0)+(data==='sensitive'?2:data==='personal'?1:0)+(['India','United "
+                     "Kingdom','United States','Singapore'].includes(country)?0:1);return "
+                     "n>=3?'high':n>=1?'medium':'low'}\n"
+                     'const stamp=()=>new Date().toISOString();\n'
+                     'const id=(n=16)=>{const b=new Uint8Array(n);crypto.getRandomValues(b);return '
+                     "[...b].map(x=>x.toString(16).padStart(2,'0')).join('')};\n"
+                     'const result=(body,status=200)=>new '
+                     "Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin'}});\n"
+                     'const all=async(db,sql,...args)=>(await db.prepare(sql).bind(...args).all()).results;\n'
+                     'const first=async(db,sql,...args)=>db.prepare(sql).bind(...args).first();\n'
+                     'const statement=(db,sql,...args)=>db.prepare(sql).bind(...args);\n'
+                     "const audit=(db,vid,action,detail)=>statement(db,'INSERT INTO "
+                     "audit(vendor,action,detail,created) VALUES(?,?,?,?)',vid,action,detail,stamp());\n"
+                     "async function detail(db,v){const evidence=await all(db,'SELECT kind,reference,created "
+                     "FROM evidence WHERE vendor=? ORDER BY kind',v.id);return "
+                     '{...v,evidence,required:requirements[v.risk],missing:requirements[v.risk].filter(k=>!evidence.some(e=>e.kind===k)),audit:await '
+                     "all(db,'SELECT action,detail,created FROM audit WHERE vendor=? ORDER BY id "
+                     "DESC',v.id)}}\n"
+                     'export default {async fetch(request,env){try{return await '
+                     "handle(request,env)}catch(e){console.error('Vendor Gate API failure',e.name);return "
+                     "result({error:'The workspace could not be loaded. Try again.'},500)}}};\n"
+                     'export async function handle(request,env){\n'
+                     ' const url=new URL(request.url),path=url.pathname,method=request.method,db=env.DB;\n'
+                     " if(!path.startsWith('/api/'))return env.ASSETS.fetch(request);\n"
+                     " if(['POST','PUT','PATCH','DELETE'].includes(method)){\n"
+                     "  if(request.headers.get('Origin')&&new "
+                     "URL(request.headers.get('Origin')).origin!==url.origin)return "
+                     "result({error:'Cross-origin writes are not allowed.'},403);\n"
+                     '  const body=await request.clone().text();if(new '
+                     "TextEncoder().encode(body).length>32768)return result({error:'Request too "
+                     "large.'},413);\n"
+                     ' }\n'
+                     " if(path==='/api/health'&&method==='GET'){await first(db,'SELECT 1 AS ok');return "
+                     "result({ok:true,project:'vendor-gate',storage:'d1',synthetic:true})}\n"
+                     " let workspace=request.headers.get('X-Workspace')||'';\n"
+                     " if(path!=='/api/workspaces'){\n"
+                     "  if(!/^[a-f0-9]{32}$/.test(workspace)||!await first(db,'SELECT id FROM workspaces "
+                     "WHERE id=?',workspace))return result({error:'This demo session has expired. Start a "
+                     "new workspace.'},401);\n"
+                     ' }\n'
+                     " if(path==='/api/workspaces'&&method==='POST'){\n"
+                     '  const cutoff=new Date(Date.now()-7*86400000).toISOString();\n'
+                     '  await db.batch([\n'
+                     "   statement(db,'DELETE FROM audit WHERE vendor IN (SELECT id FROM vendors WHERE "
+                     "workspace IN (SELECT id FROM workspaces WHERE created<?))',cutoff),\n"
+                     "   statement(db,'DELETE FROM evidence WHERE vendor IN (SELECT id FROM vendors WHERE "
+                     "workspace IN (SELECT id FROM workspaces WHERE created<?))',cutoff),\n"
+                     "   statement(db,'DELETE FROM vendors WHERE workspace IN (SELECT id FROM workspaces "
+                     "WHERE created<?)',cutoff),\n"
+                     "   statement(db,'DELETE FROM workspaces WHERE created<?',cutoff)]);\n"
+                     "  if((await first(db,'SELECT count(*) AS n FROM workspaces')).n>=100)return "
+                     "result({error:'This demo is at capacity. Try again after workspace expiry.'},503);\n"
+                     "  workspace=id();const statements=[statement(db,'INSERT INTO workspaces "
+                     "VALUES(?,?)',workspace,stamp())];\n"
+                     "  for(const [name,category,country,amount,data]of[['Northstar "
+                     "Cloud','Software','India',35000,'personal'],['Maple Office','Facilities','United "
+                     "Kingdom',8500,'none'],['Harbor Analytics','Data "
+                     "services','Singapore',120000,'sensitive']]){const "
+                     "vid=id(8);statements.push(statement(db,'INSERT INTO vendors "
+                     "VALUES(?,?,?,?,?,?,?,?,?,?,?)',vid,workspace,name,category,country,amount,data,riskFor(amount,data,country),'draft',1,stamp()),audit(db,vid,'created','Synthetic "
+                     "seed vendor created'))}\n"
+                     '  await db.batch(statements);return result({workspace},201);\n'
+                     ' }\n'
+                     " if(path==='/api/vendors'&&method==='GET'){const rows=await all(db,'SELECT * FROM "
+                     "vendors WHERE workspace=? ORDER BY created DESC',workspace);return "
+                     'result({vendors:await Promise.all(rows.map(v=>detail(db,v)))})}\n'
+                     " let data={};if(['POST','PATCH'].includes(method)){try{data=await "
+                     "request.json()}catch{return result({error:'Expected a JSON "
+                     "object.'},400)}if(!data||Array.isArray(data)||typeof data!=='object')return "
+                     "result({error:'Expected a JSON object.'},400)}\n"
+                     " if(path==='/api/vendors'&&method==='POST'){\n"
+                     "  if((await first(db,'SELECT count(*) AS n FROM vendors WHERE "
+                     "workspace=?',workspace)).n>=40)return result({error:'Demo limit: 40 vendors per "
+                     "workspace.'},429);\n"
+                     '  const '
+                     "name=String(data.name||'').trim(),category=String(data.category||'').trim(),country=String(data.country||'').trim(),access=data.data_access,amount=typeof "
+                     "data.amount==='number'?data.amount:Number(data.amount),fields={};\n"
+                     "  if(name.length<2||name.length>80)fields.name='Enter 2-80 characters.';\n"
+                     "  if(!['Software','Facilities','Data "
+                     "services','Consulting'].includes(category))fields.category='Choose a valid "
+                     "category.';\n"
+                     "  if(!['India','United Kingdom','United "
+                     "States','Singapore','Other'].includes(country))fields.country='Choose a country.';\n"
+                     '  '
+                     "if(!Number.isInteger(amount)||amount<0||amount>10000000||data.amount===undefined||data.amount===null||data.amount==='')fields.amount='Enter "
+                     "an annual amount between 0 and 10,000,000.';\n"
+                     "  if(!['none','personal','sensitive'].includes(access))fields.data_access='Choose a "
+                     "data access level.';\n"
+                     "  if(await first(db,'SELECT id FROM vendors WHERE workspace=? AND "
+                     "lower(name)=lower(?)',workspace,name))fields.name='A vendor with this name already "
+                     "exists.';\n"
+                     "  if(Object.keys(fields).length)return result({error:'Check the highlighted "
+                     "fields.',fields},422);\n"
+                     '  const vid=id(8),risk=riskFor(amount,access,country);await '
+                     "db.batch([statement(db,'INSERT INTO vendors "
+                     "VALUES(?,?,?,?,?,?,?,?,?,?,?)',vid,workspace,name,category,country,amount,access,risk,'draft',1,stamp()),audit(db,vid,'created',`Risk "
+                     "calculated: ${risk}`)]);return result({vendor:await detail(db,await first(db,'SELECT * "
+                     "FROM vendors WHERE id=?',vid))},201);\n"
+                     ' }\n'
+                     ' const match=path.match(/^\\/api\\/vendors\\/([a-f0-9]{16})$/);\n'
+                     " if(match&&['GET','PATCH'].includes(method)){\n"
+                     "  const vid=match[1],row=await first(db,'SELECT * FROM vendors WHERE id=? AND "
+                     "workspace=?',vid,workspace);if(!row)return result({error:'Vendor not found in this "
+                     "workspace.'},404);\n"
+                     "  if(method==='GET')return result({vendor:await detail(db,row)});\n"
+                     "  if(data.version!==row.version)return result({error:'Another change was saved. "
+                     "Refresh this vendor before continuing.',conflict:true},409);\n"
+                     '  // D1 batch is transactional. Version guard is checked again by SQL before writes.\n'
+                     '  let writes=[];\n'
+                     "  if(data.action==='evidence'){\n"
+                     '   const '
+                     "kind=data.kind,reference=String(data.reference||'').trim();if(!requirements[row.risk].includes(kind))return "
+                     "result({error:'Evidence type is not required for this risk "
+                     "level.'},422);if(reference.length<5||reference.length>180)return "
+                     "result({error:'Evidence reference must be 5-180 "
+                     "characters.'},422);if(row.status==='approved')return result({error:'Approved vendors "
+                     "are locked. Reopen review first.'},409);\n"
+                     "   writes=[statement(db,'INSERT INTO evidence(id,vendor,kind,reference,created) SELECT "
+                     '?,?,?,?,? WHERE EXISTS(SELECT 1 FROM vendors WHERE id=? AND version=?) ON '
+                     'CONFLICT(vendor,kind) DO UPDATE SET '
+                     "reference=excluded.reference,created=excluded.created',id(8),vid,kind,reference,stamp(),vid,row.version)];\n"
+                     "   writes.push(statement(db,'INSERT INTO audit(vendor,action,detail,created) SELECT "
+                     '?,?,?,? WHERE EXISTS(SELECT 1 FROM vendors WHERE id=? AND '
+                     "version=?)',vid,'evidence',`${kind}: ${reference}`,stamp(),vid,row.version));\n"
+                     "  }else if(data.action==='transition'){\n"
+                     '   const '
+                     "target=data.status,allowed={draft:['review'],review:['approved','draft'],approved:['review']};if(!allowed[row.status].includes(target))return "
+                     "result({error:'This status transition is not allowed.'},422);\n"
+                     '   const current=await '
+                     "detail(db,row);if(target==='approved'&&current.missing.length)return "
+                     "result({error:'Approval blocked: missing '+current.missing.join(', "
+                     "'),missing:current.missing},422);\n"
+                     "   writes=[statement(db,'UPDATE vendors SET status=? WHERE id=? AND "
+                     "version=?',target,vid,row.version),statement(db,'INSERT INTO "
+                     'audit(vendor,action,detail,created) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM vendors '
+                     "WHERE id=? AND version=?)',vid,'status',`${row.status} to "
+                     '${target}`,stamp(),vid,row.version)];\n'
+                     "  }else return result({error:'Unknown update action.'},422);\n"
+                     "  writes.push(statement(db,'UPDATE vendors SET version=version+1 WHERE id=? AND "
+                     "version=?',vid,row.version));\n"
+                     '  const outputs=await db.batch(writes);if(outputs.at(-1).meta.changes===0)return '
+                     "result({error:'Another change was saved. Refresh this vendor before "
+                     "continuing.',conflict:true},409);\n"
+                     "  return result({vendor:await detail(db,await first(db,'SELECT * FROM vendors WHERE "
+                     "id=?',vid))});\n"
+                     ' }\n'
+                     " return result({error:'Route not found.'},404);\n"
+                     '}\n',
+ 'wrangler.example.json': '{\n'
+                          '  "$schema": "node_modules/wrangler/config-schema.json",\n'
+                          '  "name": "vendor-gate-certa",\n'
+                          '  "main": "worker/index.mjs",\n'
+                          '  "compatibility_date": "2026-11-24",\n'
+                          '  "assets": {\n'
+                          '    "directory": "./static",\n'
+                          '    "binding": "ASSETS",\n'
+                          '    "not_found_handling": "single-page-application",\n'
+                          '    "run_worker_first": ["/api/*"]\n'
+                          '  },\n'
+                          '  "d1_databases": [{\n'
+                          '    "binding": "DB",\n'
+                          '    "database_name": "vendor-gate-certa",\n'
+                          '    "database_id": "REPLACE_ONLY_WITH_NEW_DEDICATED_DATABASE_ID"\n'
+                          '  }]\n'
+                          '}\n'}
 if __name__ == '__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--extract',required=True);args=parser.parse_args()
     root=pathlib.Path(args.extract)
