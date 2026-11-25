@@ -127,4 +127,4 @@ def serve_app(path):
     folder=os.path.abspath(app.static_folder)
     return send_from_directory(folder,path if path and os.path.isfile(os.path.join(folder,path)) else 'index.html')
 init_db()
-if __name__=='__main__':app.run(port=4178)
+if __name__=='__main__':app.run(host='0.0.0.0',port=int(os.environ.get('PORT','4178')))

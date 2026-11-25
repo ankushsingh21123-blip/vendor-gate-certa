@@ -63,3 +63,7 @@ MIT-licensed project code. React/React Router/Vite/Vitest/Flask and other depend
 ## Alternative hosting adapter, prepared locally
 
 `worker/` contains an original Workers/D1 adapter with 15 SQLite-backed contract tests and 3 passing browser scenarios. No Cloudflare Worker or D1 database exists yet. These are local simulations, not production runtime or remote durability proof. See `worker/README.md` for the held prerequisites. The example configuration intentionally has no real database ID.
+
+## Portable deployment preparation, 25 November
+
+`start.sh` uses Gunicorn, one worker and the assigned `PORT`, binding all interfaces. `Dockerfile` and `.dockerignore` prepare a non-root image and dedicated persistent `/data` mount. Local acceptance of production-process replacement passed: frontend, database health, evidence/audit persistence on a nondefault port. This is not a Docker run or a provider deployment. See `DEPLOYMENT.md`; the account, final free offer and supported storage must still be checked.

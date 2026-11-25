@@ -1,0 +1,12 @@
+.git
+node_modules
+web/node_modules
+.venv
+__pycache__
+.pytest_cache
+*.sqlite*
+.env*
+static
+playwright-report
+test-results
+source_bundle.py
