@@ -32,6 +32,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm --ignore-unmatch .github/workflows/.github/workflows/runtime-prep.yml
           git add .gitignore .dockerignore Dockerfile DEPLOYMENT.md start.sh test_runtime.py api/index.py requirements.txt README.md
           git diff --cached --quiet || git commit -m 'Expand verified portable runtime and restart acceptance source'
           git push
