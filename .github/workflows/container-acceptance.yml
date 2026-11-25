@@ -1,0 +1,81 @@
+name: Dedicated volume container replacement acceptance
+on:
+  push:
+    paths:
+      - .github/workflows/container-acceptance.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Require Docker and test two distinct containers sharing only disposable volume
+        run: |
+          docker version
+          cat > /tmp/vendor_container_acceptance.py <<'PYTEST'
+          """Opt-in disposable Docker volume replacement test. Never targets provider infrastructure."""
+          import json, pathlib, shutil, socket, subprocess, time, unittest, uuid
+          from urllib.request import Request, urlopen
+          ROOT = pathlib.Path(__file__).resolve().parent
+          
+          @unittest.skipUnless(shutil.which('docker'), 'Docker unavailable; container acceptance NOT verified')
+          class ContainerPersistenceTest(unittest.TestCase):
+              def test_replace_container_preserves_dedicated_volume(self):
+                  suffix = uuid.uuid4().hex[:12]
+                  image, volume = 'vendor-test:' + suffix, 'vendor-test-' + suffix
+                  containers = []
+                  def docker(*args):
+                      return subprocess.check_output(['docker', *args], cwd=ROOT, stderr=subprocess.STDOUT, timeout=180).decode().strip()
+                  with socket.socket() as sock:
+                      sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]
+                  base = 'http://127.0.0.1:' + str(port)
+                  def call(path, method='GET', payload=None, token=None):
+                      headers = {'Content-Type': 'application/json'}
+                      if token: headers['X-Workspace'] = token
+                      data = json.dumps(payload).encode() if payload is not None else None
+                      with urlopen(Request(base + path, data=data, method=method, headers=headers), timeout=3) as response:
+                          raw = response.read()
+                          return json.loads(raw) if 'json' in response.headers.get('Content-Type', '') else raw.decode()
+                  def start():
+                      name = 'vendor-test-' + uuid.uuid4().hex[:12]
+                      containers.append(name)
+                      docker('run', '-d', '--name', name, '-p', f'127.0.0.1:{port}:8080', '-e', 'PORT=8080', '-e', 'VENDOR_DB_PATH=/data/demo.sqlite3', '-v', volume + ':/data', image)
+                      for _ in range(100):
+                          try:
+                              if call('/api/health')['ok']: return name
+                          except (OSError, ValueError): time.sleep(.1)
+                      self.fail('Container readiness failed: ' + docker('logs', name))
+                  try:
+                      docker('build', '-t', image, '.')
+                      docker('volume', 'create', volume)
+                      first = start()
+                      self.assertIn('<div id="root">', call('/'))
+                      token = call('/api/workspaces', 'POST', {})['workspace']
+                      vendor = call('/api/vendors', 'POST', {'name':'Container synthetic vendor','category':'Software','country':'India','amount':5000,'data_access':'none'}, token)['vendor']
+                      vendor = call('/api/vendors/' + vendor['id'], 'PATCH', {'action':'evidence','version':vendor['version'],'kind':'business','reference':'Synthetic container registry'}, token)['vendor']
+                      docker('rm', '-f', first)
+                      second = start()
+                      self.assertNotEqual(first, second)
+                      saved = call('/api/vendors/' + vendor['id'], token=token)['vendor']
+                      self.assertEqual(saved['name'], 'Container synthetic vendor')
+                      self.assertEqual(saved['version'], vendor['version'])
+                      self.assertEqual(saved['missing'], [])
+                      self.assertEqual(len(saved['audit']), 2)
+                      self.assertEqual(saved['evidence'][0]['reference'], 'Synthetic container registry')
+                  finally:
+                      # Only delete names minted by this invocation, never existing user resources.
+                      for name in containers:
+                          subprocess.run(['docker','rm','-f',name], cwd=ROOT, capture_output=True, timeout=30)
+                      subprocess.run(['docker','volume','rm',volume], cwd=ROOT, capture_output=True, timeout=30)
+                      subprocess.run(['docker','image','rm',image], cwd=ROOT, capture_output=True, timeout=30)
+          
+          if __name__ == '__main__': unittest.main(verbosity=2)
+          PYTEST
+          sed -i "s|ROOT = pathlib.Path(__file__).resolve().parent|ROOT = pathlib.Path.cwd()|" /tmp/vendor_container_acceptance.py
+          python /tmp/vendor_container_acceptance.py
